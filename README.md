@@ -1,4 +1,9 @@
-# TDT4225 Exercise 3
+# TDT4225 Exercise 3'
+
+## Download the csv files
+
+Two of the csv files were too big for github so they have to be fetched from:
+https://drive.google.com/drive/folders/1JzO_kVfT5CJoN753A9c_xCQazhNTKca6?usp=sharing
 
 ## Install the requirements
 
