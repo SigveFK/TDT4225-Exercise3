@@ -11,10 +11,10 @@ python -m pip install -r requirements.txt
 ```env
 DATABASE=assignment_db
 HOST=localhost
-USER=assignment_user
-PASSWORD=change_this_assignment_password
+USER=user
+PASSWORD=password
 MONGO_ROOT_USER=admin
-MONGO_ROOT_PASSWORD=change_this_root_password
+MONGO_ROOT_PASSWORD=root_password
 ```
 
 ## MongoDB with Docker Compose
