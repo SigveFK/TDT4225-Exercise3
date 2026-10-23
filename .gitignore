@@ -1,3 +1,4 @@
 .env
 /__pycache__
-/csv
+/csv/ratings.csv
+/csv/credits.csv
