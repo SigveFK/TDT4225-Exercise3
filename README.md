@@ -27,8 +27,6 @@ Status:
 
 docker compose ps -a
 
-View the logs:
-
 Stop:
 
 docker compose down
