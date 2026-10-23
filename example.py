@@ -53,7 +53,7 @@ class ExampleProgram:
 
         
     def show_coll(self):
-        collections = self.client['test'].list_collection_names()
+        collections = self.client['assignment_db'].list_collection_names()
         print(collections)
          
 

@@ -1,0 +1,48 @@
+services:
+  mongodb:
+    image: mongo:7.0.1
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${DATABASE}
+    command: ["mongod", "--auth", "--bind_ip_all"]
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mongosh --quiet --host localhost --username \"$${MONGO_INITDB_ROOT_USERNAME}\" --password \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\" | grep 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  mongodb-user-init:
+    image: mongo:7.0.1
+    restart: "no"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      MONGO_ROOT_USER: ${MONGO_ROOT_USER}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      DATABASE: ${DATABASE}
+      USER: ${USER}
+      PASSWORD: ${PASSWORD}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mongosh --host mongodb --username "$$MONGO_ROOT_USER"
+        --password "$$MONGO_ROOT_PASSWORD" --authenticationDatabase admin
+        --eval "db = db.getSiblingDB('$$DATABASE');
+        if (!db.getUser('$$USER')) {
+          db.createUser({user: '$$USER', pwd: '$$PASSWORD', roles: [{role: 'readWrite', db: '$$DATABASE'}]});
+        }"
+
+volumes:
+  mongodb_data:
