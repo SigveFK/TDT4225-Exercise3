@@ -139,6 +139,33 @@ def print_date_values(data):
     print(f"- valid dates: {dates.notna().sum():,}")
     print(f"- earliest: {dates.min()}  latest: {dates.max()}")
 
+
+def print_year_distribution(data):
+    dates = pd.to_datetime(data["release_date"], errors="coerce").dropna()
+    years = dates.dt.year
+    print("\nRelease-year distribution:")
+    print(f"- years covered: {years.min()} - {years.max()}")
+    print("- movies per decade:")
+    for decade, count in (years // 10 * 10).value_counts().sort_index().items():
+        print(f"    {decade}s: {count:,}")
+    print(f"- busiest years: {years.value_counts().head(5).to_dict()}")
+    print(f"- movies before 1900: {(years < 1900).sum():,}")
+    print(f"- movies after 2017 (check whether they are unreleased): {(years > 2017).sum():,}")
+
+
+def print_nested_keys(name, data, columns):
+    print(f"\n{name} keys inside nested objects:")
+    for column in columns:
+        keys = Counter()
+        for value in data[column]:
+            status, parsed = parse_nested_value(value)
+            if status != "ok":
+                continue
+            for item in parsed if isinstance(parsed, list) else [parsed]:
+                if isinstance(item, dict):
+                    keys.update(item.keys())
+        print(f"- {column}: {dict(keys)}")
+
 def print_credit_people_report(credits):
     genders = Counter()
     cast_total = 0
@@ -213,6 +240,11 @@ def print_rating_report(ratings):
     for column in ["userId", "movieId", "rating", "timestamp"]:
         if column in ratings:
             print(f"- {column} unique values: {ratings[column].nunique():,}")
+    pair_rows = ratings.duplicated(["userId", "movieId"], keep=False).sum()
+    triple_rows = ratings.duplicated(["userId", "movieId", "timestamp"], keep=False).sum()
+    print(f"- rows sharing (userId, movieId): {pair_rows:,}")
+    print(f"- rows sharing (userId, movieId, timestamp): {triple_rows:,}")
+    print(f"- rows that are re-ratings (same user and movie, different timestamp): {pair_rows - triple_rows:,}")
     print_numeric_values("Ratings", ratings, ["rating"])
     print(f"- rating values: {sorted(ratings['rating'].unique().tolist())}")
     timestamps = pd.to_datetime(ratings["timestamp"], unit="s", errors="coerce")
@@ -257,17 +289,16 @@ def main():
     )
     print_movie_value_report(movies)
     print_date_values(movies)
-    print_nested_field_counts(
-        "Movies",
-        movies,
-        [
-            "genres",
-            "belongs_to_collection",
-            "production_companies",
-            "production_countries",
-            "spoken_languages",
-        ],
-    )
+    print_year_distribution(movies)
+    nested_movie_columns = [
+        "genres",
+        "belongs_to_collection",
+        "production_companies",
+        "production_countries",
+        "spoken_languages",
+    ]
+    print_nested_field_counts("Movies", movies, nested_movie_columns)
+    print_nested_keys("Movies", movies, nested_movie_columns)
 
     print_dataset_report(args.ratings, ratings, ["userId", "movieId"])
     print_rating_report(ratings)

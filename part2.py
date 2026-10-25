@@ -6,9 +6,6 @@ from itertools import combinations
 from pprint import pprint
 from DbConnector import DbConnector
 
-# For Q8: actor-directors would otherwise be paired with themselves.
-EXCLUDE_SELF_PAIRS = True
-
 def median(values):
     values = [value for value in values if value is not None]
     return statistics.median(values) if values else None
@@ -65,13 +62,14 @@ def query_directors(credits):
 
     results = []
     for row in aggregate(credits, pipeline):
+        movie_count = len(row["movie_ids"])
         revenues = [value for value in row["revenues"] if value is not None]
-        if len(revenues) < 5:
+        if movie_count < 5 or not revenues:
             continue
         results.append(
             {
                 "director": row["director"],
-                "movie_count": len(row["movie_ids"]),
+                "movie_count": movie_count,
                 "movies_with_revenue": len(revenues),
                 "median_revenue": median(revenues),
                 "mean_vote_average": mean(row["vote_averages"]),
@@ -321,24 +319,18 @@ def query_director_actor(credits):
         {"$match": {"crew.job": "Director", "crew.id": {"$ne": None}}},
         {"$unwind": "$cast"},
         {"$match": {"cast.id": {"$ne": None}}},
+        {
+            "$group": {
+                "_id": {"director_id": "$crew.id", "actor_id": "$cast.id"},
+                "director": {"$first": "$crew.name"},
+                "actor": {"$first": "$cast.name"},
+                "films": {"$sum": 1},
+                "vote_averages": {"$push": "$movie.vote_average"},
+                "revenues": {"$push": "$movie.revenue"},
+            }
+        },
+        {"$match": {"films": {"$gte": 3}}},
     ]
-    if EXCLUDE_SELF_PAIRS:
-        pipeline.append({"$match": {"$expr": {"$ne": ["$crew.id", "$cast.id"]}}})
-    pipeline.extend(
-        [
-            {
-                "$group": {
-                    "_id": {"director_id": "$crew.id", "actor_id": "$cast.id"},
-                    "director": {"$first": "$crew.name"},
-                    "actor": {"$first": "$cast.name"},
-                    "films": {"$sum": 1},
-                    "vote_averages": {"$push": "$movie.vote_average"},
-                    "revenues": {"$push": "$movie.revenue"},
-                }
-            },
-            {"$match": {"films": {"$gte": 3}}},
-        ]
-    )
 
     results = []
     for row in aggregate(credits, pipeline):
@@ -347,6 +339,7 @@ def query_director_actor(credits):
             {
                 "director": row["director"],
                 "actor": row["actor"],
+                "same_person": row["_id"]["director_id"] == row["_id"]["actor_id"],
                 "films_count": row["films"],
                 "mean_vote_average": mean(row["vote_averages"]),
                 "mean_revenue": mean(revenues),

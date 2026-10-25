@@ -4,13 +4,17 @@
 erDiagram
     movies ||--o| credits : "has credit document"
     movies ||--o| keywords : "has keyword document"
-    movies ||--o| ratings : "has user ratings"
-    movies ||--o| links : "has external links"
+    movies ||--o| ratings : "has user ratings through tmdb_id"
+    links ||--o| ratings : "maps MovieLens movie id"
     movies {
-        string id PK "source movie identifier"
+        int id PK "TMDB movie identifier"
         string title
         string original_language
-        string release_date
+        date release_date
+        int release_year
+        int budget
+        int revenue
+        float runtime
         int vote_count
         float vote_average
         array genres
@@ -21,27 +25,26 @@ erDiagram
         string tagline
     }
     credits {
-        string id PK "same movie identifier as movies"
-        string movie_id FK "reference to movies id"
+        int id PK "same TMDB identifier as movies"
         array cast
         array crew
     }
     keywords {
-        string id PK "same movie identifier as movies"
-        string movie_id FK "reference to movies id"
+        int id PK "same TMDB identifier as movies"
         array keywords
     }
     ratings {
-        string id PK "user movie timestamp combination"
+        objectid id PK "MongoDB generated identifier"
         int user_id
-        int movie_id FK "reference to links movie_id"
+        int movie_id FK "MovieLens movie identifier"
+        int tmdb_id FK "reference to movies id; nullable"
         float rating
-        int timestamp
+        date timestamp
     }
     links {
         int id PK "MovieLens movie identifier"
         int movie_id UK "same value as document id"
         string imdb_id
-        int tmdb_id
+        int tmdb_id FK "reference to movies id; nullable"
     }
 ```
