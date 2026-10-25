@@ -1,4 +1,4 @@
-# TDT4225 Exercise 3'
+# TDT4225 Exercise 3
 
 ## Download the csv files
 

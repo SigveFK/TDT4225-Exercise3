@@ -20,11 +20,16 @@ def parse_nested_value(value):
         except (ValueError, SyntaxError):
             return []
 
-def print_dataset_report(name, data):
+def print_dataset_report(name, data, key_columns):
     print(f"\n{name}:\n")
     print(f"Rows: {len(data):,}")
     print(f"Columns: {len(data.columns)}")
     print(f"Duplicate rows: {data.duplicated().sum():,}")
+    duplicate_keys = data.duplicated(subset=key_columns, keep=False)
+    duplicate_key_values = data.loc[duplicate_keys, key_columns].drop_duplicates()
+    key_name = ", ".join(key_columns)
+    print(f"Duplicate key values ({key_name}): {len(duplicate_key_values):,}")
+    print(f"Rows with duplicate keys ({key_name}): {duplicate_keys.sum():,}")
 
     print("\nColumns and data types:")
     for column in data.columns:
@@ -118,7 +123,7 @@ def main():
     credits = read_csv(paths["credits.csv"])
     keywords = read_csv(paths["keywords.csv"])
 
-    print_dataset_report("movies_metadata.csv", movies)
+    print_dataset_report("movies_metadata.csv", movies, ["id"])
     print_numeric_values(
         "Movies",
         movies,
@@ -137,14 +142,18 @@ def main():
         ],
     )
 
-    print_dataset_report(args.ratings, ratings)
+    print_dataset_report(
+        args.ratings,
+        ratings,
+        ["userId", "movieId", "timestamp"],
+    )
     print_rating_report(ratings)
 
-    print_dataset_report(args.links, links)
-    print_dataset_report("credits.csv", credits)
+    print_dataset_report(args.links, links, ["movieId"])
+    print_dataset_report("credits.csv", credits, ["id"])
     print_nested_field_counts("Credits", credits, ["cast", "crew"])
 
-    print_dataset_report("keywords.csv", keywords)
+    print_dataset_report("keywords.csv", keywords, ["id"])
     print_nested_field_counts("Keywords", keywords, ["keywords"])
 
 if __name__ == "__main__":
