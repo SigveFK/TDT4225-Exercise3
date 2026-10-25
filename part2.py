@@ -1,50 +1,80 @@
 import argparse
 import statistics
 import sys
+from collections import Counter, defaultdict
+from itertools import combinations
 from pprint import pprint
 from DbConnector import DbConnector
+
+# For Q8: actor-directors would otherwise be paired with themselves.
+EXCLUDE_SELF_PAIRS = True
 
 def median(values):
     values = [value for value in values if value is not None]
     return statistics.median(values) if values else None
 
-def query_directors(movies, credits):
+def mean(values):
+    values = [value for value in values if value is not None]
+    return sum(values) / len(values) if values else None
+
+def aggregate(collection, pipeline):
+    return collection.aggregate(pipeline, allowDiskUse=True)
+
+def date_text(value):
+    return value.strftime("%Y-%m-%d") if value else None
+
+def movie_lookup(fields, extra_match=None):
+    pipeline = []
+    if extra_match:
+        pipeline.append({"$match": extra_match})
+    pipeline.append({"$project": {field: 1 for field in fields}})
+    return {
+        "$lookup": {
+            "from": "movies",
+            "localField": "_id",
+            "foreignField": "_id",
+            "pipeline": pipeline,
+            "as": "movie",
+        }
+    }
+
+def query_directors(credits):
     pipeline = [
         {"$unwind": "$crew"},
         {"$match": {"crew.job": "Director", "crew.id": {"$ne": None}}},
-        {
-            "$lookup": {
-                "from": "movies",
-                "localField": "_id",
-                "foreignField": "_id",
-                "as": "movie",
-            }
-        },
+        movie_lookup(["revenue", "vote_average", "vote_count"]),
         {"$unwind": "$movie"},
         {
             "$group": {
                 "_id": "$crew.id",
                 "director": {"$first": "$crew.name"},
+                "movie_ids": {"$addToSet": "$_id"},
                 "revenues": {"$push": "$movie.revenue"},
-                "movie_count": {"$addToSet": "$_id"},
-                "vote_averages": {"$push": "$movie.vote_average"},
+                "vote_averages": {
+                    "$push": {
+                        "$cond": [
+                            {"$gt": ["$movie.vote_count", 0]},
+                            "$movie.vote_average",
+                            None,
+                        ]
+                    }
+                },
             }
         },
     ]
 
     results = []
-    for row in credits.aggregate(pipeline):
-        vote_averages = [value for value in row["vote_averages"] if value is not None]
+    for row in aggregate(credits, pipeline):
         revenues = [value for value in row["revenues"] if value is not None]
-        movie_count = len(row["movie_count"])
-        if movie_count < 5 or not revenues or not vote_averages:
+        if len(revenues) < 5:
             continue
         results.append(
             {
                 "director": row["director"],
-                "movie_count": movie_count,
+                "movie_count": len(row["movie_ids"]),
+                "movies_with_revenue": len(revenues),
                 "median_revenue": median(revenues),
-                "mean_vote_average": sum(vote_averages) / len(vote_averages),
+                "mean_vote_average": mean(row["vote_averages"]),
             }
         )
     return sorted(
@@ -53,127 +83,80 @@ def query_directors(movies, credits):
         reverse=True,
     )[:10]
 
-
-def movie_vote_averages(movies, movie_ids):
-    return {
-        movie["_id"]: movie.get("vote_average")
-        for movie in movies.find(
-            {"_id": {"$in": movie_ids}}, {"_id": 1, "vote_average": 1}
+def query_actor_pairs(movies, credits):
+    vote = {
+        movie["_id"]: (
+            movie.get("vote_average") if (movie.get("vote_count") or 0) > 0 else None
         )
+        for movie in movies.find({}, {"vote_average": 1, "vote_count": 1})
     }
 
+    credit_counts = Counter()
+    for document in credits.find({}, {"cast.id": 1}):
+        credit_counts.update(person["id"] for person in document["cast"])
+    eligible = {actor for actor, count in credit_counts.items() if count >= 3}
 
-def query_actor_pairs(movies, credits):
-    pipeline = [
-        {"$unwind": "$cast"},
-        {"$match": {"cast.id": {"$ne": None}}},
-        {
-            "$project": {
-                "movie_id": "$_id",
-                "actor_id": "$cast.id",
-                "actor": "$cast.name",
-            }
-        },
-        {
-            "$lookup": {
-                "from": "credits",
-                "let": {"movie_id": "$movie_id", "actor_id": "$actor_id"},
-                "pipeline": [
-                    {
-                        "$match": {
-                            "$expr": {"$eq": ["$_id", "$$movie_id"]},
-                        }
-                    },
-                    {"$unwind": "$cast"},
-                    {
-                        "$match": {
-                            "$expr": {
-                                "$and": [
-                                    {"$ne": ["$cast.id", "$$actor_id"]},
-                                    {"$gt": ["$cast.id", "$$actor_id"]},
-                                ]
-                            }
-                        }
-                    },
-                    {
-                        "$project": {
-                            "_id": 0,
-                            "actor_id": "$cast.id",
-                            "actor": "$cast.name",
-                        }
-                    },
-                ],
-                "as": "co_actor",
-            }
-        },
-        {"$unwind": "$co_actor"},
-        {
-            "$group": {
-                "_id": {
-                    "actor_id": "$actor_id",
-                    "co_actor_id": "$co_actor.actor_id",
-                },
-                "actor": {"$first": "$actor"},
-                "co_actor": {"$first": "$co_actor.actor"},
-                "movie_ids": {"$addToSet": "$movie_id"},
-            }
-        },
-        {"$match": {"$expr": {"$gte": [{"$size": "$movie_ids"}, 3]}}},
-        {"$sort": {"_id.actor_id": 1, "_id.co_actor_id": 1}},
-    ]
-
-    results = []
-    for row in credits.aggregate(pipeline):
-        averages = movie_vote_averages(movies, row["movie_ids"])
-        values = [averages[movie_id] for movie_id in row["movie_ids"] if averages.get(movie_id) is not None]
-        if not values:
+    stats = defaultdict(lambda: [0, 0.0, 0])  # appearances, vote sum, vote count
+    names = {}
+    for document in credits.find({}, {"cast.id": 1, "cast.name": 1}):
+        if document["_id"] not in vote:
             continue
-        results.append(
-            {
-                "actor": row["actor"],
-                "co_actor": row["co_actor"],
-                "co_appearances": len(row["movie_ids"]),
-                "mean_vote_average": sum(values) / len(values),
-            }
+        cast = sorted(
+            (person["id"], person.get("name"))
+            for person in document["cast"]
+            if person["id"] in eligible
         )
+        movie_vote = vote[document["_id"]]
+        for (actor_a, name_a), (actor_b, name_b) in combinations(cast, 2):
+            names[actor_a], names[actor_b] = name_a, name_b
+            entry = stats[(actor_a, actor_b)]
+            entry[0] += 1
+            if movie_vote is not None:
+                entry[1] += movie_vote
+                entry[2] += 1
+
+    results = [
+        {
+            "actor": names[actor_a],
+            "co_actor": names[actor_b],
+            "co_appearances": appearances,
+            "mean_vote_average": vote_sum / vote_count if vote_count else None,
+        }
+        for (actor_a, actor_b), (appearances, vote_sum, vote_count) in stats.items()
+        if appearances >= 3
+    ]
     return sorted(
         results,
-        key=lambda row: (row["co_appearances"], row["mean_vote_average"]),
+        key=lambda row: (
+            row["co_appearances"],
+            row["mean_vote_average"] or 0,
+            row["actor"] or "",
+            row["co_actor"] or "",
+        ),
         reverse=True,
     )
 
-def query_actor_genres(movies, credits):
+def query_actor_genres(credits):
     pipeline = [
+        movie_lookup(["genres.name"]),
+        {"$unwind": "$movie"},
         {"$unwind": "$cast"},
         {"$match": {"cast.id": {"$ne": None}}},
-        {
-            "$lookup": {
-                "from": "movies",
-                "localField": "_id",
-                "foreignField": "_id",
-                "as": "movie",
-            }
-        },
-        {"$unwind": "$movie"},
         {
             "$group": {
                 "_id": "$cast.id",
                 "actor": {"$first": "$cast.name"},
                 "movies": {"$addToSet": "$_id"},
-                "genre_lists": {"$push": {"$ifNull": ["$movie.genres", []]}},
+                "genre_names": {"$push": {"$ifNull": ["$movie.genres.name", []]}},
             }
         },
+        {"$match": {"$expr": {"$gte": [{"$size": "$movies"}, 10]}}},
     ]
 
     results = []
-    for row in credits.aggregate(pipeline):
-        if len(row["movies"]) < 10:
-            continue
+    for row in aggregate(credits, pipeline):
         genres = {
-            genre.get("name")
-            for genre_list in row["genre_lists"]
-            for genre in genre_list
-            if genre.get("name")
+            name for names in row["genre_names"] for name in names if name
         }
         results.append(
             {
@@ -185,7 +168,7 @@ def query_actor_genres(movies, credits):
         )
     return sorted(
         results,
-        key=lambda row: (row["genre_count"], row["movie_count"], row["actor"]),
+        key=lambda row: (row["genre_count"], row["movie_count"], row["actor"] or ""),
         reverse=True,
     )[:10]
 
@@ -194,10 +177,15 @@ def query_collections(movies):
         {"$match": {"belongs_to_collection.name": {"$ne": None}}},
         {
             "$group": {
-                "_id": "$belongs_to_collection.name",
+                "_id": "$belongs_to_collection.id",
+                "collection": {"$first": "$belongs_to_collection.name"},
                 "movie_count": {"$sum": 1},
                 "revenues": {"$push": "$revenue"},
-                "vote_averages": {"$push": "$vote_average"},
+                "vote_averages": {
+                    "$push": {
+                        "$cond": [{"$gt": ["$vote_count", 0]}, "$vote_average", None]
+                    }
+                },
                 "release_dates": {"$push": "$release_date"},
             }
         },
@@ -205,16 +193,16 @@ def query_collections(movies):
     ]
 
     results = []
-    for row in movies.aggregate(pipeline):
+    for row in aggregate(movies, pipeline):
         dates = [date for date in row["release_dates"] if date]
         results.append(
             {
-                "collection": row["_id"],
+                "collection": row["collection"],
                 "movie_count": row["movie_count"],
                 "total_revenue": sum(value or 0 for value in row["revenues"]),
                 "median_vote_average": median(row["vote_averages"]),
-                "earliest_release": min(dates) if dates else None,
-                "latest_release": max(dates) if dates else None,
+                "earliest_release": date_text(min(dates)) if dates else None,
+                "latest_release": date_text(max(dates)) if dates else None,
             }
         )
     return sorted(results, key=lambda row: row["total_revenue"], reverse=True)[:10]
@@ -224,9 +212,7 @@ def query_decade_genres(movies):
         {"$match": {"release_year": {"$ne": None}}},
         {
             "$set": {
-                "primary_genre": {
-                    "$arrayElemAt": [{"$ifNull": ["$genres", []]}, 0]
-                }
+                "primary_genre": {"$arrayElemAt": [{"$ifNull": ["$genres", []]}, 0]}
             }
         },
         {"$match": {"primary_genre.name": {"$ne": None}, "runtime": {"$ne": None}}},
@@ -234,16 +220,9 @@ def query_decade_genres(movies):
             "$group": {
                 "_id": {
                     "decade": {
-                        "$multiply": [
-                            {
-                                "$floor": {
-                                    "$divide": [
-                                        "$release_year",
-                                        10,
-                                    ]
-                                }
-                            },
-                            10,
+                        "$subtract": [
+                            "$release_year",
+                            {"$mod": ["$release_year", 10]},
                         ]
                     },
                     "genre": "$primary_genre.name",
@@ -254,49 +233,51 @@ def query_decade_genres(movies):
         },
     ]
 
-    results = []
-    for row in movies.aggregate(pipeline):
-        results.append(
-            {
-                "decade": f"{int(row['_id']['decade'])}s",
-                "primary_genre": row["_id"]["genre"],
-                "median_runtime": median(row["runtimes"]),
-                "movie_count": row["movie_count"],
-            }
-        )
-    return sorted(
-        results,
-        key=lambda row: (row["decade"], -(row["median_runtime"] or 0)),
-    )
-
-def query_female_cast(movies, credits):
-    pipeline = [
-        {"$unwind": "$cast"},
-        {"$sort": {"_id": 1, "cast.order": 1}},
-        {"$group": {"_id": "$_id", "cast": {"$push": "$cast"}}},
+    results = [
         {
-            "$lookup": {
-                "from": "movies",
-                "localField": "_id",
-                "foreignField": "_id",
-                "as": "movie",
+            "decade_start": int(row["_id"]["decade"]),
+            "primary_genre": row["_id"]["genre"],
+            "median_runtime": median(row["runtimes"]),
+            "movie_count": row["movie_count"],
+        }
+        for row in aggregate(movies, pipeline)
+    ]
+    results.sort(key=lambda row: (row["decade_start"], -row["median_runtime"]))
+    return [
+        {
+            "decade": f"{row['decade_start']}s",
+            "primary_genre": row["primary_genre"],
+            "median_runtime": row["median_runtime"],
+            "movie_count": row["movie_count"],
+        }
+        for row in results
+    ]
+
+def query_female_cast(credits):
+    pipeline = [
+        {
+            "$project": {
+                "cast": {
+                    "$slice": [
+                        {"$sortArray": {"input": "$cast", "sortBy": {"order": 1}}},
+                        5,
+                    ]
+                }
             }
         },
+        movie_lookup(["release_year"]),
         {"$unwind": "$movie"},
+        {"$match": {"movie.release_year": {"$ne": None}}},
+        {"$project": {"year": "$movie.release_year", "genders": "$cast.gender"}},
     ]
 
     by_decade = {}
-    for row in credits.aggregate(pipeline):
-        known = [
-            person for person in row["cast"][:5] if person.get("gender") in (1, 2)
-        ]
-        year = row["movie"].get("release_year")
-        if not known or year is None:
+    for row in aggregate(credits, pipeline):
+        known = [gender for gender in row["genders"] if gender in (1, 2)]
+        if not known:
             continue
-        decade = year // 10 * 10
-        by_decade.setdefault(decade, []).append(
-            sum(person.get("gender") == 1 for person in known) / len(known)
-        )
+        decade = row["year"] // 10 * 10
+        by_decade.setdefault(decade, []).append(known.count(1) / len(known))
 
     return sorted(
         [
@@ -313,107 +294,92 @@ def query_female_cast(movies, credits):
 
 def query_noir(movies):
     pipeline = [
-        {
-            "$match": {
-                "$text": {"$search": "noir"},
-                "vote_count": {"$gte": 50},
-            }
-        },
+        {"$match": {"$text": {"$search": "noir"}, "vote_count": {"$gte": 50}}},
         {
             "$project": {
                 "_id": 0,
                 "title": 1,
-                "year": {"$substrBytes": ["$release_date", 0, 4]},
+                "year": "$release_year",
                 "vote_average": 1,
                 "vote_count": 1,
                 "score": {"$meta": "textScore"},
             }
         },
-        {"$sort": {"vote_average": -1, "score": -1}},
+        {"$sort": {"vote_average": -1, "vote_count": -1, "score": -1}},
         {"$limit": 20},
     ]
     return list(movies.aggregate(pipeline))
 
-def query_director_actor(movies, credits):
+def query_director_actor(credits):
     pipeline = [
-        {
-            "$lookup": {
-                "from": "movies",
-                "localField": "_id",
-                "foreignField": "_id",
-                "as": "movie",
-            }
-        },
+        movie_lookup(
+            ["vote_average", "revenue"],
+            extra_match={"vote_count": {"$gte": 100}, "vote_average": {"$ne": None}},
+        ),
         {"$unwind": "$movie"},
-        {"$match": {"movie.vote_count": {"$gte": 100}}},
         {"$unwind": "$crew"},
         {"$match": {"crew.job": "Director", "crew.id": {"$ne": None}}},
         {"$unwind": "$cast"},
         {"$match": {"cast.id": {"$ne": None}}},
-        {
-            "$match": {
-                "movie.vote_average": {"$ne": None},
-            }
-        },
-        {
-            "$group": {
-                "_id": {
-                    "director_id": "$crew.id",
-                    "actor_id": "$cast.id",
-                },
-                "director": {"$first": "$crew.name"},
-                "actor": {"$first": "$cast.name"},
-                "films": {"$sum": 1},
-                "vote_averages": {"$push": "$movie.vote_average"},
-                "revenues": {"$push": "$movie.revenue"},
-            }
-        },
-        {"$match": {"films": {"$gte": 3}}},
     ]
+    if EXCLUDE_SELF_PAIRS:
+        pipeline.append({"$match": {"$expr": {"$ne": ["$crew.id", "$cast.id"]}}})
+    pipeline.extend(
+        [
+            {
+                "$group": {
+                    "_id": {"director_id": "$crew.id", "actor_id": "$cast.id"},
+                    "director": {"$first": "$crew.name"},
+                    "actor": {"$first": "$cast.name"},
+                    "films": {"$sum": 1},
+                    "vote_averages": {"$push": "$movie.vote_average"},
+                    "revenues": {"$push": "$movie.revenue"},
+                }
+            },
+            {"$match": {"films": {"$gte": 3}}},
+        ]
+    )
 
     results = []
-    for row in credits.aggregate(pipeline):
+    for row in aggregate(credits, pipeline):
+        revenues = [value for value in row["revenues"] if value is not None]
         results.append(
             {
                 "director": row["director"],
                 "actor": row["actor"],
                 "films_count": row["films"],
-                "mean_vote_average": sum(row["vote_averages"])
-                / len(row["vote_averages"]),
-                "mean_revenue": (
-                    sum(value for value in row["revenues"] if value is not None)
-                    / len([value for value in row["revenues"] if value is not None])
-                    if any(value is not None for value in row["revenues"])
-                    else None
-                ),
+                "mean_vote_average": mean(row["vote_averages"]),
+                "mean_revenue": mean(revenues),
+                "films_with_revenue": len(revenues),
             }
         )
     return sorted(
         results,
-        key=lambda row: (row["mean_vote_average"], row["films_count"], row["director"]),
+        key=lambda row: (
+            row["mean_vote_average"],
+            row["films_count"],
+            row["director"] or "",
+        ),
         reverse=True,
     )[:20]
+
 
 def query_non_english(movies):
     pipeline = [
         {
             "$match": {
                 "original_language": {"$nin": [None, "", "en"]},
-                "$or": [
-                    {"production_countries.iso_3166_1": "US"},
-                    {"production_companies.origin_country": "US"},
-                ],
+                "production_countries.iso_3166_1": "US",
             }
         },
-        {"$sort": {"title": 1}},
         {
             "$group": {
                 "_id": "$original_language",
                 "count": {"$sum": 1},
-                "example_title": {"$first": "$title"},
+                "example_title": {"$min": "$title"},
             }
         },
-        {"$sort": {"count": -1}},
+        {"$sort": {"count": -1, "_id": 1}},
         {"$limit": 10},
     ]
     return [
@@ -422,7 +388,7 @@ def query_non_english(movies):
             "count": row["count"],
             "example_title": row["example_title"],
         }
-        for row in movies.aggregate(pipeline)
+        for row in aggregate(movies, pipeline)
     ]
 
 def query_users(movies, ratings):
@@ -448,10 +414,10 @@ def query_users(movies, ratings):
     ]
 
     results = []
-    for row in ratings.aggregate(pipeline):
+    for row in aggregate(ratings, pipeline):
         ratings_count = row["ratings_count"]
-        mean = row["rating_sum"] / ratings_count
-        variance = row["rating_squared_sum"] / ratings_count - mean**2
+        rating_mean = row["rating_sum"] / ratings_count
+        variance = row["rating_squared_sum"] / ratings_count - rating_mean**2
         genres = {
             genre
             for movie_id in row["movie_ids"]
@@ -468,11 +434,7 @@ def query_users(movies, ratings):
 
     by_genres = sorted(
         results,
-        key=lambda row: (
-            row["distinct_genres"],
-            row["ratings_count"],
-            row["user_id"],
-        ),
+        key=lambda row: (row["distinct_genres"], row["ratings_count"], row["user_id"]),
         reverse=True,
     )[:10]
     by_variance = sorted(
@@ -501,18 +463,18 @@ def main():
 
     connector = DbConnector()
     try:
-        database = connector.db
+        db = connector.db
         queries = {
-            1: ("1. Directors", lambda: query_directors(database.movies, database.credits)),
-            2: ("2. Actor pairs", lambda: query_actor_pairs(database.movies, database.credits)),
-            3: ("3. Actor genre breadth", lambda: query_actor_genres(database.movies, database.credits)),
-            4: ("4. Film collections", lambda: query_collections(database.movies)),
-            5: ("5. Decade and primary genre", lambda: query_decade_genres(database.movies)),
-            6: ("6. Female top-five cast", lambda: query_female_cast(database.movies, database.credits)),
-            7: ("7. Noir text search", lambda: query_noir(database.movies)),
-            8: ("8. Director-actor pairs", lambda: query_director_actor(database.movies, database.credits)),
-            9: ("9. Non-English US production", lambda: query_non_english(database.movies)),
-            10: ("10. User rating statistics", lambda: query_users(database.movies, database.ratings)),
+            1: ("1. Directors", lambda: query_directors(db.credits)),
+            2: ("2. Actor pairs", lambda: query_actor_pairs(db.movies, db.credits)),
+            3: ("3. Actor genre breadth", lambda: query_actor_genres(db.credits)),
+            4: ("4. Film collections", lambda: query_collections(db.movies)),
+            5: ("5. Decade and primary genre", lambda: query_decade_genres(db.movies)),
+            6: ("6. Female top-five cast", lambda: query_female_cast(db.credits)),
+            7: ("7. Noir text search", lambda: query_noir(db.movies)),
+            8: ("8. Director-actor pairs", lambda: query_director_actor(db.credits)),
+            9: ("9. Non-English US production", lambda: query_non_english(db.movies)),
+            10: ("10. User rating statistics", lambda: query_users(db.movies, db.ratings)),
         }
 
         selected = [args.query] if args.query else queries.keys()

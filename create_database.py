@@ -8,6 +8,9 @@ from pymongo import InsertOne
 from DbConnector import DbConnector
 
 BATCH_SIZE = 1_000
+RATINGS_BATCH_SIZE = 10_000
+DROPPED_MOVIE_FIELDS = ["homepage", "poster_path", "video"]
+
 csv.field_size_limit(10**9)
 parse_failures = 0
 
@@ -19,7 +22,7 @@ def parse_nested(value):
 
     try:
         parsed = ast.literal_eval(str(value))
-    except (ValueError, SyntaxError):
+    except (ValueError, SyntaxError, MemoryError, RecursionError):
         try:
             parsed = json.loads(str(value))
         except (json.JSONDecodeError, TypeError):
@@ -30,6 +33,10 @@ def parse_nested(value):
         parse_failures += 1
         return None
     return parsed
+
+def parse_list(value):
+    parsed = parse_nested(value)
+    return parsed if isinstance(parsed, list) else []
 
 def as_int(value):
     if value is None or str(value).strip() == "":
@@ -60,15 +67,21 @@ def as_date(value):
         return None
 
 def clean_movie(row):
-    movie = dict(row)
+    movie = {
+        key: (None if value == "" else value)
+        for key, value in row.items()
+        if key is not None
+    }
     movie_id = as_int(movie.pop("id", None))
     if movie_id is None:
         return None
+    for field in DROPPED_MOVIE_FIELDS:
+        movie.pop(field, None)
 
     movie["_id"] = movie_id
-    for field in ["budget", "revenue", "runtime"]:
-        value = as_float(movie.get(field))
-        movie[field] = value if value else None
+    movie["budget"] = as_int(movie.get("budget")) or None
+    movie["revenue"] = as_int(movie.get("revenue")) or None
+    movie["runtime"] = as_float(movie.get("runtime")) or None
     movie["vote_count"] = as_int(movie.get("vote_count"))
     movie["popularity"] = as_float(movie.get("popularity"))
     movie["vote_average"] = as_float(movie.get("vote_average"))
@@ -86,21 +99,27 @@ def clean_movie(row):
     movie["release_year"] = (
         movie["release_date"].year if movie["release_date"] else None
     )
-    movie["adult"] = str(movie.get("adult", "")).strip().lower() == "true"
+    movie["adult"] = str(movie.get("adult") or "").strip().lower() == "true"
     return movie
 
-def dedupe_people(people):
+def person_order(person):
+    order = as_int(person.get("order"))
+    return order if order is not None else 10**9
+
+def dedupe_people(people, by_job=False):
     unique = {}
-    for person in people or []:
+    for person in people if isinstance(people, list) else []:
+        if not isinstance(person, dict):
+            continue
         person_id = as_int(person.get("id"))
         if person_id is None:
             continue
-        person = dict(person)
-        person["id"] = person_id
-        current = unique.get(person_id)
-        if current is None or person.get("order", 10**9) < current.get("order", 10**9):
-            unique[person_id] = person
+        key = (person_id, person.get("job")) if by_job else person_id
+        current = unique.get(key)
+        if current is None or person_order(person) < person_order(current):
+            unique[key] = {**person, "id": person_id}
     return list(unique.values())
+
 
 def clean_credit(row):
     movie_id = as_int(row.get("id"))
@@ -108,18 +127,15 @@ def clean_credit(row):
         return None
     return {
         "_id": movie_id,
-        "cast": dedupe_people(parse_nested(row.get("cast"))),
-        "crew": dedupe_people(parse_nested(row.get("crew"))),
+        "cast": dedupe_people(parse_list(row.get("cast"))),
+        "crew": dedupe_people(parse_list(row.get("crew")), by_job=True),
     }
 
 def clean_keywords(row):
     movie_id = as_int(row.get("id"))
     if movie_id is None:
         return None
-    return {
-        "_id": movie_id,
-        "keywords": parse_nested(row.get("keywords")) or [],
-    }
+    return {"_id": movie_id, "keywords": parse_list(row.get("keywords"))}
 
 def clean_rating(row, tmdb_ids):
     user_id = as_int(row.get("userId"))
@@ -141,12 +157,14 @@ def clean_link(row):
     movie_id = as_int(row.get("movieId"))
     if movie_id is None:
         return None
+    imdb = (row.get("imdbId") or "").strip()
     return {
         "_id": movie_id,
         "movie_id": movie_id,
-        "imdb_id": row.get("imdbId") or None,
+        "imdb_id": f"tt{imdb}" if imdb else None,
         "tmdb_id": as_int(row.get("tmdbId")),
     }
+
 
 def read_documents(path, cleaner):
     with path.open(encoding="utf-8", newline="") as file:
@@ -175,17 +193,19 @@ def resolve_duplicates(documents, name):
     selected_records = 0
 
     for candidates in grouped.values():
+        if len(candidates) == 1:
+            resolved.append(candidates[0])
+            continue
+
         unique_documents = []
         for candidate in candidates:
             if candidate not in unique_documents:
                 unique_documents.append(candidate)
         exact_duplicates += len(candidates) - len(unique_documents)
 
-        titles = {candidate.get("title") for candidate in unique_documents if candidate.get("title")}
+        titles = {c.get("title") for c in unique_documents if c.get("title")}
         release_dates = {
-            candidate.get("release_date")
-            for candidate in unique_documents
-            if candidate.get("release_date")
+            c.get("release_date") for c in unique_documents if c.get("release_date")
         }
         if name == "movies" and (len(titles) > 1 or len(release_dates) > 1):
             conflicting_records += len(unique_documents)
@@ -208,69 +228,80 @@ def resolve_duplicates(documents, name):
     )
     return resolved
 
-def load_collection(database, name, path, cleaner, resolve=True):
-    collection = database[name]
-    collection.drop()
-    documents = read_documents(path, cleaner)
-    if resolve:
-        documents = resolve_duplicates(list(documents), name)
-
+def insert_in_batches(collection, documents, batch_size=BATCH_SIZE):
     inserted = 0
     operations = []
     for document in documents:
         operations.append(InsertOne(document))
-        if len(operations) == BATCH_SIZE:
+        if len(operations) == batch_size:
             collection.bulk_write(operations, ordered=False)
             inserted += len(operations)
             operations = []
-
     if operations:
         collection.bulk_write(operations, ordered=False)
         inserted += len(operations)
-    print(f"{name}: inserted {inserted:,}")
+    return inserted
+
+def load_collection(database, name, path, cleaner):
+    collection = database[name]
+    collection.drop()
+    documents = resolve_duplicates(list(read_documents(path, cleaner)), name)
+    print(f"{name}: inserted {insert_in_batches(collection, documents):,}")
 
 def load_ratings(database, path, tmdb_ids):
     collection = database.ratings
     collection.drop()
-    inserted = 0
-    skipped = 0
-    operations = []
+    counts = {"skipped": 0, "no_tmdb_id": 0}
 
-    with path.open(encoding="utf-8", newline="") as file:
-        for row in csv.DictReader(file):
-            document = clean_rating(row, tmdb_ids)
-            if document is None:
-                skipped += 1
-                continue
-            operations.append(InsertOne(document))
-            if len(operations) == BATCH_SIZE:
-                collection.bulk_write(operations, ordered=False)
-                inserted += len(operations)
-                operations = []
+    def documents():
+        with path.open(encoding="utf-8", newline="") as file:
+            for row in csv.DictReader(file):
+                document = clean_rating(row, tmdb_ids)
+                if document is None:
+                    counts["skipped"] += 1
+                    continue
+                if document["tmdb_id"] is None:
+                    counts["no_tmdb_id"] += 1
+                yield document
 
-    if operations:
-        collection.bulk_write(operations, ordered=False)
-        inserted += len(operations)
-    print(f"ratings: inserted {inserted:,}; skipped rows {skipped:,}")
+    inserted = insert_in_batches(collection, documents(), RATINGS_BATCH_SIZE)
+    print(
+        f"ratings: inserted {inserted:,}; skipped rows {counts['skipped']:,}; "
+        f"ratings without a TMDB id {counts['no_tmdb_id']:,}"
+    )
+
+def report_orphans(database):
+    movie_ids = {doc["_id"] for doc in database.movies.find({}, {"_id": 1})}
+    for name in ("credits", "keywords"):
+        orphans = sum(
+            1 for doc in database[name].find({}, {"_id": 1}) if doc["_id"] not in movie_ids
+        )
+        print(f"{name}: documents without a matching movie: {orphans:,}")
+    print(
+        "links: rows without a TMDB id: "
+        f"{database.links.count_documents({'tmdb_id': None}):,}"
+    )
 
 def create_indexes(database):
     database.movies.create_index([("overview", "text"), ("tagline", "text")])
     database.movies.create_index("release_year")
     database.movies.create_index("original_language")
     database.movies.create_index("vote_count")
-    database.credits.create_index("crew.job")
-    database.keywords.create_index("keywords.name")
     database.links.create_index("tmdb_id")
-    database.ratings.create_index("movie_id")
-    database.ratings.create_index("tmdb_id")
     database.ratings.create_index("user_id")
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Load the Movies dataset into MongoDB.")
     parser.add_argument("--data-dir", type=Path, default=Path("csv"))
     parser.add_argument("--ratings", default="ratings_small.csv")
     parser.add_argument("--links", default="links_small.csv")
     args = parser.parse_args()
+
+    if ("small" in args.ratings) != ("small" in args.links):
+        print(
+            "WARNING: ratings and links files do not match (small vs full); "
+            "many ratings will end up without a TMDB id."
+        )
 
     data_dir = args.data_dir
     paths = {
@@ -299,6 +330,7 @@ def main():
         }
         load_ratings(connector.db, paths["ratings"], tmdb_ids)
         create_indexes(connector.db)
+        report_orphans(connector.db)
         print(f"Nested-field parse failures: {parse_failures:,}")
     finally:
         connector.close_connection()
