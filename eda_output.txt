@@ -1,0 +1,354 @@
+
+movies_metadata.csv:
+
+Rows: 45,466
+Columns: 24
+Duplicate rows: 17
+Duplicate key values (id): 29
+Rows with duplicate keys (id): 59
+
+Columns and data types:
+- adult: object
+- belongs_to_collection: object
+- budget: object
+- genres: object
+- homepage: object
+- id: object
+- imdb_id: object
+- original_language: object
+- original_title: object
+- overview: object
+- popularity: object
+- poster_path: object
+- production_companies: object
+- production_countries: object
+- release_date: object
+- revenue: float64
+- runtime: float64
+- spoken_languages: object
+- status: object
+- tagline: object
+- title: object
+- video: object
+- vote_average: float64
+- vote_count: float64
+
+Missing values:
+- adult: missing=0, empty=0
+- belongs_to_collection: missing=40,972, empty=0
+- budget: missing=0, empty=0
+- genres: missing=0, empty=0
+- homepage: missing=37,684, empty=0
+- id: missing=0, empty=0
+- imdb_id: missing=17, empty=0
+- original_language: missing=11, empty=0
+- original_title: missing=0, empty=0
+- overview: missing=954, empty=0
+- popularity: missing=5, empty=0
+- poster_path: missing=386, empty=0
+- production_companies: missing=3, empty=0
+- production_countries: missing=3, empty=0
+- release_date: missing=87, empty=0
+- revenue: missing=6, empty=0
+- runtime: missing=263, empty=0
+- spoken_languages: missing=6, empty=0
+- status: missing=87, empty=0
+- tagline: missing=25,054, empty=0
+- title: missing=6, empty=0
+- video: missing=6, empty=0
+- vote_average: missing=6, empty=0
+- vote_count: missing=6, empty=0
+
+Malformed movie ids that is not an integer:
+- rows: 3
+- values: ['1997-08-20', '2012-09-29', '2014-01-01']
+
+Duplicate movie ids, by kind:
+- ids with only exact duplicate rows: 16
+- ids, same movie but differing values: 13
+- ids with conflicting title/release date: 0
+
+Movies column numbers:
+
+budget
+  valid values: 45,463
+  invalid values: 3
+  zero values: 36,573
+  minimum: 0.0
+  median: 0.0
+  maximum: 380000000.0
+  mean: 4224578.813474693
+
+revenue
+  valid values: 45,460
+  invalid values: 6
+  zero values: 38,052
+  minimum: 0.0
+  median: 0.0
+  maximum: 2787965087.0
+  mean: 11209348.539265288
+
+runtime
+  valid values: 45,203
+  invalid values: 263
+  zero values: 1,558
+  minimum: 0.0
+  median: 95.0
+  maximum: 1256.0
+  mean: 94.12819945578833
+
+vote_average
+  valid values: 45,460
+  invalid values: 6
+  zero values: 2,998
+  minimum: 0.0
+  median: 6.0
+  maximum: 10.0
+  mean: 5.618207215134185
+
+vote_count
+  valid values: 45,460
+  invalid values: 6
+  zero values: 2,899
+  minimum: 0.0
+  median: 10.0
+  maximum: 14075.0
+  mean: 109.89733831940167
+
+popularity
+  valid values: 45,460
+  invalid values: 6
+  zero values: 66
+  minimum: 0.0
+  median: 1.127685
+  maximum: 547.488298
+  mean: 2.9214783449186092
+
+Zero values:
+- budget: 36,573 of 45,463 valid values are 0 (80.4%)
+- revenue: 38,052 of 45,460 valid values are 0 (83.7%)
+- runtime: 1,558 of 45,203 valid values are 0 (3.4%)
+
+Movies without votes:
+- vote_count == 0: 2,899
+- of those, vote_average == 0: 2,899
+
+Release dates:
+- missing: 87
+- YYYY-MM-DD format: 45,376
+- present but not YYYY-MM-DD: 3
+- valid dates: 45,376
+- earliest: 1874-12-09 00:00:00  latest: 2020-12-16 00:00:00
+
+Release-year distribution:
+- years covered: 1874 - 2020
+- movies per decade:
+    1870s: 2
+    1880s: 4
+    1890s: 75
+    1900s: 87
+    1910s: 176
+    1920s: 432
+    1930s: 1,317
+    1940s: 1,494
+    1950s: 2,080
+    1960s: 2,622
+    1970s: 3,472
+    1980s: 3,931
+    1990s: 5,677
+    2000s: 11,207
+    2010s: 12,799
+    2020s: 1
+- busiest years: {2014: 1974, 2015: 1905, 2013: 1889, 2012: 1722, 2011: 1667}
+- movies before 1900: 81
+- movies after 2017 (check whether they are unreleased): 6
+
+Movies nested-field counts:
+
+genres
+  missing/empty values: 0
+  unparseable values: 0
+  parsed, empty list/dict: 2,442
+  parsed, non-empty: 43,024
+  parsed types: {'list': 45466}
+
+belongs_to_collection
+  missing/empty values: 40,972
+  unparseable values: 3
+  parsed, empty list/dict: 0
+  parsed, non-empty: 4,491
+  parsed types: {'dict': 4491}
+
+production_companies
+  missing/empty values: 3
+  unparseable values: 3
+  parsed, empty list/dict: 11,875
+  parsed, non-empty: 33,585
+  parsed types: {'list': 45460}
+
+production_countries
+  missing/empty values: 3
+  unparseable values: 3
+  parsed, empty list/dict: 6,282
+  parsed, non-empty: 39,178
+  parsed types: {'list': 45460}
+
+spoken_languages
+  missing/empty values: 6
+  unparseable values: 0
+  parsed, empty list/dict: 3,829
+  parsed, non-empty: 41,631
+  parsed types: {'list': 45460}
+
+Movies keys inside nested objects:
+- genres: {'id': 91106, 'name': 91106}
+- belongs_to_collection: {'id': 4491, 'name': 4491, 'poster_path': 4491, 'backdrop_path': 4491}
+- production_companies: {'name': 70545, 'id': 70545}
+- production_countries: {'iso_3166_1': 49423, 'name': 49423}
+- spoken_languages: {'iso_639_1': 53300, 'name': 53300}
+
+ratings.csv:
+
+Rows: 26,024,289
+Columns: 4
+Duplicate rows: 0
+Duplicate key values (userId, movieId): 0
+Rows with duplicate keys (userId, movieId): 0
+
+Columns and data types:
+- userId: int64
+- movieId: int64
+- rating: float64
+- timestamp: int64
+
+Missing values:
+- userId: missing=0, empty=0
+- movieId: missing=0, empty=0
+- rating: missing=0, empty=0
+- timestamp: missing=0, empty=0
+
+Ratings:
+- userId unique values: 270,896
+- movieId unique values: 45,115
+- rating unique values: 10
+- timestamp unique values: 20,549,435
+- rows sharing (userId, movieId): 0
+- rows sharing (userId, movieId, timestamp): 0
+- rows that are re-ratings (same user and movie, different timestamp): 0
+
+Ratings column numbers:
+
+rating
+  valid values: 26,024,289
+  invalid values: 0
+  zero values: 0
+  minimum: 0.5
+  median: 3.5
+  maximum: 5.0
+  mean: 3.5280903543608817
+- rating values: [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
+- valid timestamps: 26,024,289
+- invalid timestamps: 0
+- earliest: 1995-01-09 11:46:44  latest: 2017-08-04 06:57:50
+- users with >= 20 ratings: 166,444 of 270,896
+
+links.csv:
+
+Rows: 45,843
+Columns: 3
+Duplicate rows: 0
+Duplicate key values (movieId): 0
+Rows with duplicate keys (movieId): 0
+
+Columns and data types:
+- movieId: int64
+- imdbId: int64
+- tmdbId: float64
+
+Missing values:
+- movieId: missing=0, empty=0
+- imdbId: missing=0, empty=0
+- tmdbId: missing=219, empty=0
+
+credits.csv:
+
+Rows: 45,476
+Columns: 3
+Duplicate rows: 37
+Duplicate key values (id): 43
+Rows with duplicate keys (id): 87
+
+Columns and data types:
+- cast: object
+- crew: object
+- id: int64
+
+Missing values:
+- cast: missing=0, empty=0
+- crew: missing=0, empty=0
+- id: missing=0, empty=0
+
+Credits nested-field counts:
+
+cast
+  missing/empty values: 0
+  unparseable values: 0
+  parsed, empty list/dict: 2,418
+  parsed, non-empty: 43,058
+  parsed types: {'list': 45476}
+
+crew
+  missing/empty values: 0
+  unparseable values: 0
+  parsed, empty list/dict: 771
+  parsed, non-empty: 44,705
+  parsed types: {'list': 45476}
+
+Cast and crew details:
+- cast entries in total: 562,474
+  gender 1 (female): 111,797 (19.9%)
+  gender 2 (male): 226,713 (40.3%)
+  gender 0 (unknown): 223,964 (39.8%)
+- movies where the same person appears twice in cast: 953
+- movies whose top-5 cast do not have orders 0-4: 8,139
+- movies where a person has several different crew jobs: 24,509
+- movies where a person has the same crew job twice: 0
+- movies without a Director: 887
+- movies with more than one Director: 3,200
+
+keywords.csv:
+
+Rows: 46,419
+Columns: 2
+Duplicate rows: 987
+Duplicate key values (id): 985
+Rows with duplicate keys (id): 1,972
+
+Columns and data types:
+- id: int64
+- keywords: object
+
+Missing values:
+- id: missing=0, empty=0
+- keywords: missing=0, empty=0
+
+Keywords nested-field counts:
+
+keywords
+  missing/empty values: 0
+  unparseable values: 0
+  parsed, empty list/dict: 14,795
+  parsed, non-empty: 31,624
+  parsed types: {'list': 46419}
+
+Cross-file consistency:
+- movies without credits: 1
+- credits without a movie: 0
+- movies without keywords: 1
+- keywords without a movie: 0
+- links without a tmdbId: 219
+- links whose tmdbId is not in movies: 161
+- tmdbIds used by more than one link: 59
+- ratings whose movieId is not in links: 0
+- ratings without a usable tmdbId: 13,503
+- ratings whose tmdbId is not in movies: 29,204
